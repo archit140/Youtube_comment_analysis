@@ -5,7 +5,7 @@ build-backend = "flit_core.buildapi"
 [project]
 name = "yt_comment"
 version = "0.0.1"
-description = "ML project"
+description = "YouTube comment sentiment analysis pipeline with MLflow, DVC, and Flask serving"
 authors = [
   { name = "Archit Sharma" },
 ]
@@ -20,8 +20,8 @@ requires-python = "~=3.10.0"
 
 [tool.ruff]
 line-length = 99
-src = ["yt_comment"]
-include = ["pyproject.toml", "yt_comment/**/*.py"]
+src = ["src", "flask_app", "tests"]
+include = ["pyproject.toml", "project_utils.py", "src/**/*.py", "flask_app/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting

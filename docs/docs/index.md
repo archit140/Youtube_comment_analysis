@@ -1,10 +1,17 @@
-# yt_comment documentation!
+# YouTube Comment Sentiment Analysis
 
-## Description
+This documentation site supports a compact machine-learning project that predicts sentiment for YouTube comments and serves the trained model through a Flask API.
 
-ML project
+## What Is In This Project
 
-## Commands
+- DVC pipeline stages for ingestion, preprocessing, training, evaluation, and registration
+- TF-IDF feature engineering with LightGBM classification
+- MLflow experiment tracking and model registry integration
+- Flask endpoints for predictions and comment-driven visualizations
 
-The Makefile contains the central entry points for common tasks related to this project.
+## Where To Start
+
+- Read the top-level `README.md` for setup and usage
+- Read `ARCHITECTURE.md` for module responsibilities and data flow
+- Read `INTERVIEW_NOTES.md` if you are revising the project for interviews
 
