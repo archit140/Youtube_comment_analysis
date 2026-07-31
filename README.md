@@ -191,18 +191,6 @@ docker run -p 8000:8000 yt-comment-api
 - If you want a fully self-contained deployment, keep `lgbm_model.pkl` and `tfidf_vectorizer.pkl` with the app or adapt the loader to use only local artifacts.
 - Before public deployment, set the environment variables for your own MLflow server and model version.
 
-## Interview Notes
-
-This project is especially useful for revising:
-
-- NLP preprocessing
-- TF-IDF feature engineering
-- LightGBM for text classification
-- experiment tracking with MLflow
-- data pipelines with DVC
-- model serving with Flask
-
-See [INTERVIEW_NOTES.md](C:\Users\archi\OneDrive\Desktop\yt_comment\INTERVIEW_NOTES.md) for a focused revision guide.
 
 ## Important Context
 
