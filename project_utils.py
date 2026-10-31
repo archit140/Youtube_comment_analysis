@@ -22,9 +22,11 @@ DEFAULT_DATASET_URL = (
     "reddit-sentiment-analysis/refs/heads/main/data/reddit.csv"
 )
 
-DEFAULT_MLFLOW_TRACKING_URI = "http://127.0.0.1:5000"
+DEFAULT_MLFLOW_TRACKING_URI = (
+    f"sqlite:///{(PROJECT_ROOT / 'mlflow.db').resolve().as_posix()}"
+)
 DEFAULT_MLFLOW_EXPERIMENT = "yt-comment-analysis"
-DEFAULT_MODEL_NAME = "yt_chrome_plugin_model"
+DEFAULT_MODEL_NAME = "local_lightgbm"
 
 
 def get_env(name: str, default: str) -> str:
@@ -58,6 +60,11 @@ def ensure_nltk_resource(resource_path: str, package_name: str) -> None:
     try:
         nltk.data.find(resource_path)
     except LookupError:
+        if get_env("ALLOW_NLTK_DOWNLOAD", "false").lower() != "true":
+            raise RuntimeError(
+                f"Missing NLTK resource '{package_name}'. Install it before offline execution "
+                "or set ALLOW_NLTK_DOWNLOAD=true for an explicit one-time download."
+            )
         nltk.download(package_name, quiet=True)
 
 
@@ -68,18 +75,28 @@ def ensure_nltk_dependencies() -> None:
 
 
 def preprocess_comment(comment) -> str:
-    ensure_nltk_dependencies()
-
     if comment is None:
         return ""
+
+    try:
+        ensure_nltk_dependencies()
+        stop_words = set(stopwords.words("english"))
+        lemmatizer = WordNetLemmatizer()
+    except (LookupError, RuntimeError):
+        # Keep inference usable offline when optional NLTK corpora have not been
+        # provisioned yet. The training environment should install the corpora
+        # for the full stopword-removal and lemmatization path.
+        stop_words = set()
+        lemmatizer = None
 
     comment = str(comment).lower().strip()
     comment = re.sub(r"\n", " ", comment)
     comment = re.sub(r"[^A-Za-z0-9\s!?.,]", "", comment)
 
     retained_words = {"not", "but", "however", "no", "yet"}
-    stop_words = set(stopwords.words("english")) - retained_words
+    stop_words -= retained_words
     comment = " ".join(word for word in comment.split() if word not in stop_words)
 
-    lemmatizer = WordNetLemmatizer()
+    if lemmatizer is None:
+        return comment
     return " ".join(lemmatizer.lemmatize(word) for word in comment.split())

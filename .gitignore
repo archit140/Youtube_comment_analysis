@@ -192,3 +192,14 @@ cython_debug/
 /lgbm_model.pkl
 /tfidf_vectorizer.pkl
 /experiment_info.json
+/mlruns/
+mlflow.db
+mlflow.db-*
+/.dvc/storage/
+/site-cache/
+/logs/
+*.log
+myenv/
+/models/*.joblib
+/models/*.pt
+/models/*_report.json

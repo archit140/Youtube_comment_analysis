@@ -6,7 +6,6 @@ The project is organized as an ML pipeline plus an inference service.
 
 - `src/` contains the actual data and model pipeline.
 - `flask_app/` contains the runtime inference API.
-- `notebooks/` capture the experimentation path that led to the current model choices.
 - `project_utils.py` holds shared configuration, preprocessing, paths, and logger setup.
 - `dvc.yaml` describes the order of pipeline stages and their dependencies.
 - `params.yaml` holds model hyperparameters used by the training stage.
@@ -51,62 +50,38 @@ Why it matters:
 - Preserving words like `not` and `no` is a domain-aware sentiment decision.
 - The shared preprocessing now lives in `project_utils.py` so training and inference use the same core logic.
 
-### 3. Model Building
+### 3. Model Training and Evaluation
 
-File: `src/model/model_building.py`
+Files: `src/models/` and `src/training/`
 
 Responsibilities:
 
-- Load processed training data
-- Convert comment text into TF-IDF features
-- Configure and train a multiclass LightGBM classifier
-- Serialize the vectorizer and trained model
+- Build shared TF-IDF pipelines for four traditional models.
+- Train the CPU-friendly PyTorch MLP baseline.
+- Use a stratified validation split while keeping the test set untouched.
+- Compute accuracy, macro/weighted metrics, per-class metrics, timings, and confusion matrices.
+- Save local model artifacts and measured comparison reports.
 
 Important design decisions:
 
-- `ngram_range: [1, 3]` means the model uses unigram, bigram, and trigram information.
-- `class_weight="balanced"` and `is_unbalance=True` reflect awareness of class imbalance.
-- The vectorizer is saved separately because inference must reproduce the exact same feature space.
+- `ngram_range: [1, 3]` provides unigram, bigram, and trigram features.
+- Macro F1 is used for model comparison because the sentiment classes are imbalanced.
+- The full preprocessing/model pipeline is saved for consistent inference.
 
-### 4. Model Evaluation
+### 5. Local Artifact Selection
 
-File: `src/model/model_evaluation.py`
+The primary serving artifact is selected with `LOCAL_MODEL_PATH` and defaults to
+`models/lightgbm.joblib`. MLflow remains available for local experiment tracking
+and an explicitly configured local `MLFLOW_MODEL_URI`, but the API does not
+depend on a registry or remote service.
 
-Responsibilities:
-
-- Load the saved model and vectorizer
-- Transform the processed test dataset
-- Compute classification metrics and confusion matrix
-- Log parameters, metrics, model artifact, vectorizer, and confusion matrix to MLflow
-- Save run metadata into `experiment_info.json`
-
-Why it matters:
-
-- This stage shows the difference between training a model and managing an experiment.
-- It is the strongest MLOps-oriented part of the repo.
-
-### 5. Model Registration
-
-File: `src/model/register_model.py`
-
-Responsibilities:
-
-- Read the saved run metadata
-- Register the model artifact from MLflow into the Model Registry
-- Move the new model version to the `Staging` stage
-
-Why it matters:
-
-- This turns a local experiment into a deployable tracked model version.
-- It shows understanding of the model lifecycle, not just notebook-level experimentation.
-
-### 6. Flask Inference Service
+### 5. Flask Inference Service
 
 File: `flask_app/app.py`
 
 Responsibilities:
 
-- Load MLflow model and local vectorizer
+- Load the local serialized model pipeline, with an optional local MLflow URI fallback
 - Apply inference-time preprocessing
 - Predict sentiment for comment lists
 - Generate chart, word cloud, and trend graph responses
@@ -125,18 +100,18 @@ Endpoints:
 
 ### Training Flow
 
-1. `data_ingestion.py` downloads and splits the dataset.
+1. `data_ingestion.py` explicitly downloads and splits the dataset.
 2. `data_preprocessing.py` normalizes raw comments.
-3. `model_building.py` fits TF-IDF and trains LightGBM.
-4. `model_evaluation.py` logs evaluation results to MLflow.
-5. `register_model.py` registers the trained model version.
+3. `src/training/train.py` fits the selected TF-IDF/classifier pipeline.
+4. `src/training/compare.py` evaluates all selected models on the untouched test set.
+5. The selected local artifact is loaded directly by Flask and Streamlit.
 
 ### Inference Flow
 
 1. Client sends comments to the Flask API.
 2. API preprocesses each comment.
-3. Saved TF-IDF vectorizer transforms the comments.
-4. Loaded MLflow model predicts class labels.
+3. The saved pipeline transforms comments and predicts class labels.
+4. Confidence is returned when the classifier supports probabilities.
 5. API returns sentiment labels or derived visualizations.
 
 ## Design Trade-Offs
@@ -146,6 +121,6 @@ Endpoints:
 - Strength:
   - DVC plus MLflow make the project more interview-ready than a notebook-only workflow.
 - Trade-off:
-  - The Flask app depends on both a reachable MLflow server and a local vectorizer file, which adds setup friction.
+  - The optional YouTube analysis tab depends on an API key and YouTube API quota, while model inference remains local.
 - Trade-off:
   - The dataset source is external, so reproducibility depends on that URL remaining available unless you vendor the dataset.

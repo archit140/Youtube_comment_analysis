@@ -5,6 +5,7 @@ stages:
     - src/data/data_ingestion.py
     params:
     - data_ingestion.test_size
+    - data_ingestion.random_state
     outs:
     - data/raw
 
@@ -16,36 +17,27 @@ stages:
     - src/data/data_preprocessing.py
     outs:
     - data/interim  
-
-
-  model_building:
-    cmd: python src/model/model_building.py
+  model_comparison:
+    cmd: python -m src.training.compare --models naive_bayes logistic_regression linear_svm lightgbm mlp --random-state ${data_ingestion.random_state}
     deps:
-    - data/interim/train_processed.csv
-    - src/model/model_building.py
-    params:
-    - model_building.max_features
-    - model_building.ngram_range
-    - model_building.learning_rate
-    - model_building.max_depth
-    - model_building.n_estimators
-    outs:
-    - lgbm_model.pkl
-    - tfidf_vectorizer.pkl
-  model_evaluation:
-    cmd: python src/model/model_evaluation.py
-    deps:
-    - lgbm_model.pkl
-    - tfidf_vectorizer.pkl
     - data/interim/train_processed.csv
     - data/interim/test_processed.csv
-    - src/model/model_evaluation.py
-    
+    - src/models/traditional.py
+    - src/models/mlp.py
+    - src/training/evaluation.py
+    - src/training/train.py
+    - src/training/compare.py
+    params:
+    - data_ingestion.random_state
+    - model_building.max_features
+    - model_building.ngram_range
+    - mlp.max_features
+    - mlp.hidden_size
+    - mlp.dropout
+    - mlp.epochs
+    - mlp.batch_size
+    - mlp.learning_rate
     outs:
-    - experiment_info.json
-
-  model_registration:
-    cmd: python src/model/register_model.py
-    deps:
-    - experiment_info.json
-    - src/model/register_model.py  
+    - reports/model_comparison.csv
+    - reports/model_comparison.json
+    - reports/figures

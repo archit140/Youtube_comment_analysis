@@ -10,7 +10,7 @@ Revise this repo in the same order that data flows through it:
 4. LightGBM training
 5. Model evaluation metrics
 6. DVC pipeline tracking
-7. MLflow experiment tracking and model registry
+7. MLflow experiment tracking with local artifacts
 8. Flask inference API
 
 ## High Priority Topics
@@ -50,8 +50,8 @@ Follow-up questions:
 
 Where used:
 
-- `src/model/model_building.py`
-- `src/model/model_evaluation.py`
+- `src/training/train.py`
+- `src/training/compare.py`
 - `flask_app/app.py`
 
 Why used:
@@ -81,7 +81,7 @@ Follow-up questions:
 
 Where used:
 
-- `src/model/model_building.py`
+- `src/training/train.py`
 
 Why used:
 
@@ -109,8 +109,8 @@ Follow-up questions:
 
 Where used:
 
-- `src/model/model_evaluation.py`
-- `src/model/register_model.py`
+- `src/training/train.py`
+- `src/training/compare.py`
 - `flask_app/app.py`
 
 Why used:
@@ -121,14 +121,13 @@ What to revise:
 
 - experiments vs runs
 - logging parameters, metrics, and artifacts
-- model registry concepts
-- stage transitions
+- local model artifact loading
 
 Common interview questions:
 
 - What does MLflow add beyond saving a `.pkl` file?
-- Why store the model in a registry?
-- What is the difference between tracking and registry?
+- Why keep the primary serving artifact local?
+- What is the difference between a model artifact and an experiment run?
 
 Follow-up questions:
 
@@ -213,7 +212,7 @@ Common interview questions:
 
 Where used:
 
-- `src/model/model_evaluation.py`
+- `src/training/train.py`
 
 Why used:
 
@@ -260,5 +259,5 @@ Why it matters:
 - The strongest part of this project is the end-to-end workflow, not just the model.
 - You can explain both experimentation and model serving from one codebase.
 - The model is trained on a labeled sentiment dataset and then applied to YouTube comments, so be ready to explain that transfer honestly.
-- The biggest engineering strength is combining DVC, MLflow, and Flask in a compact real-world project.
-- The biggest deployment dependency is MLflow availability plus access to the saved vectorizer.
+- The biggest engineering strength is combining DVC, local MLflow, and Flask in a compact real-world project.
+- The primary deployment dependency is the saved local model pipeline.

@@ -20,9 +20,7 @@ copy .env.example .env
 ```bash
 python src/data/data_ingestion.py
 python src/data/data_preprocessing.py
-python src/model/model_building.py
-python src/model/model_evaluation.py
-python src/model/register_model.py
+python -m src.training.compare --models naive_bayes logistic_regression linear_svm lightgbm mlp
 ```
 
 If you use DVC:

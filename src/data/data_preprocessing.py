@@ -1,12 +1,15 @@
 import pandas as pd
 from project_utils import INTERIM_DATA_DIR, RAW_DATA_DIR, preprocess_comment, setup_logger
+from src.data.contracts import LABEL_COLUMN, TEXT_COLUMN, validate_dataset
 
 logger = setup_logger("data_preprocessing", "data_preprocessing_errors.log")
 
 def normalize_text(df):
     """Apply preprocessing to the text data in the dataframe."""
     try:
-        df['clean_comment'] = df['clean_comment'].apply(preprocess_comment)
+        df = validate_dataset(df)
+        df[TEXT_COLUMN] = df[TEXT_COLUMN].apply(preprocess_comment)
+        df = df[df[TEXT_COLUMN].ne("")].reset_index(drop=True)
         logger.debug('Text normalization completed')
         return df
     except Exception as e:

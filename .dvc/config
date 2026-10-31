@@ -1,6 +1,7 @@
 [core]
-    remote = s3remote
-['remote "myremote"']
-    url = s3://ytcomment1
-['remote "s3remote"']
-    url = s3://ytcomment1/dvcstore
+    remote = local
+    site_cache_dir = site-cache
+[cache]
+    dir = cache
+[remote "local"]
+    url = storage

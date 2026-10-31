@@ -10,8 +10,12 @@ This keeps the original endpoints but makes local usage easier by:
 import io
 import logging
 import os
+import sys
 import time
-import traceback
+from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import joblib
 import matplotlib
@@ -22,12 +26,13 @@ import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
+from nltk.corpus import stopwords
 from scipy import sparse
-from wordcloud import WordCloud
 
 from project_utils import (
     DEFAULT_MLFLOW_TRACKING_URI,
     DEFAULT_MODEL_NAME,
+    PROJECT_ROOT,
     preprocess_comment,
 )
 
@@ -45,12 +50,30 @@ _VECTORIZER = None
 _MODEL_LOADING = False
 
 
-def load_model_and_vectorizer(model_name, model_version, vectorizer_path, tracking_uri=None):
-    """Load the MLflow model together with the local TF-IDF vectorizer."""
+def load_model_and_vectorizer(
+    model_name, model_version, vectorizer_path, tracking_uri=None, local_model_path=None
+):
+    """Load a local pipeline first, then fall back to the local MLflow registry."""
+    if local_model_path:
+        local_model_path = os.path.abspath(
+            local_model_path if os.path.isabs(local_model_path) else PROJECT_ROOT / local_model_path
+        )
+    if local_model_path and os.path.exists(local_model_path):
+        logger.info("Loading local pipeline from %s", local_model_path)
+        if local_model_path.lower().endswith(".pt"):
+            from src.models.mlp import TextMlpClassifier
+
+            return TextMlpClassifier.load(local_model_path), None
+        return joblib.load(local_model_path), None
+
     if tracking_uri:
         mlflow.set_tracking_uri(tracking_uri)
 
-    model_uri = f"models:/{model_name}/{model_version}"
+    model_uri = os.environ.get("MLFLOW_MODEL_URI")
+    if not model_uri:
+        raise RuntimeError(
+            "No local model found. Set LOCAL_MODEL_PATH to a trained model artifact."
+        )
     logger.info("Loading model from %s", model_uri)
     model = mlflow.pyfunc.load_model(model_uri)
     vectorizer = joblib.load(vectorizer_path)
@@ -61,7 +84,7 @@ def get_model_vectorizer():
     """Return cached artifacts or load them on demand."""
     global _MODEL, _VECTORIZER, _MODEL_LOADING
 
-    if _MODEL is not None and _VECTORIZER is not None:
+    if _MODEL is not None:
         return _MODEL, _VECTORIZER
 
     if _MODEL_LOADING:
@@ -73,17 +96,19 @@ def get_model_vectorizer():
         "MLFLOW_TRACKING_URI",
         DEFAULT_MLFLOW_TRACKING_URI,
     )
-    model_name = os.environ.get("MLFLOW_MODEL_NAME", DEFAULT_MODEL_NAME)
-    model_version = os.environ.get("MLFLOW_MODEL_VERSION", "1")
     vectorizer_path = os.environ.get("VECTORIZER_PATH", "./tfidf_vectorizer.pkl")
+    local_model_path = os.environ.get(
+        "LOCAL_MODEL_PATH", str(PROJECT_ROOT / "models" / "lightgbm.joblib")
+    )
 
     try:
         _MODEL_LOADING = True
         _MODEL, _VECTORIZER = load_model_and_vectorizer(
-            model_name=model_name,
-            model_version=model_version,
+            model_name=DEFAULT_MODEL_NAME,
+            model_version="1",
             vectorizer_path=vectorizer_path,
             tracking_uri=tracking_uri,
+            local_model_path=local_model_path,
         )
         logger.info("Model and vectorizer loaded successfully.")
         return _MODEL, _VECTORIZER
@@ -93,28 +118,56 @@ def get_model_vectorizer():
 
 def predict_from_vectorizer(model, vectorizer, preprocessed_comments):
     """Transform text with TF-IDF and make predictions using the loaded model."""
-    transformed = vectorizer.transform(preprocessed_comments)
+    predictions, _ = predict_outputs(model, vectorizer, preprocessed_comments)
+    return predictions
 
-    if sparse.issparse(transformed):
-        try:
-            columns = vectorizer.get_feature_names_out()
-        except Exception:
-            columns = [f"f{i}" for i in range(transformed.shape[1])]
-        transformed = pd.DataFrame(transformed.toarray(), columns=columns)
-    elif isinstance(transformed, np.ndarray):
-        transformed = pd.DataFrame(transformed)
+
+def predict_outputs(model, vectorizer, preprocessed_comments):
+    """Return predictions and optional confidence scores."""
+    if vectorizer is None:
+        model_input = preprocessed_comments
     else:
-        transformed = pd.DataFrame(np.asarray(transformed))
+        model_input = vectorizer.transform(preprocessed_comments)
+        if not sparse.issparse(model_input):
+            model_input = np.asarray(model_input)
 
-    predictions = model.predict(transformed)
-    return list(map(str, np.asarray(predictions).tolist()))
+    predictions = np.asarray(model.predict(model_input)).tolist()
+    confidences = [None] * len(predictions)
+    if hasattr(model, "predict_proba"):
+        try:
+            probabilities = np.asarray(model.predict_proba(model_input))
+            confidences = [round(float(value), 6) for value in probabilities.max(axis=1)]
+        except (AttributeError, NotImplementedError, ValueError):
+            pass
+    return list(map(str, predictions)), confidences
+
+
+def current_model_name(model=None) -> str:
+    """Return a stable display name for the active local model."""
+    configured = os.environ.get("LOCAL_MODEL_PATH")
+    if configured:
+        return os.path.splitext(os.path.basename(configured))[0]
+    if model is not None and model.__class__.__name__:
+        if hasattr(model, "named_steps") and "classifier" in model.named_steps:
+            classifier = model.named_steps["classifier"]
+            classifier_names = {
+                "LGBMClassifier": "lightgbm",
+                "LogisticRegression": "logistic_regression",
+                "LinearSVC": "linear_svm",
+                "MultinomialNB": "naive_bayes",
+            }
+            return classifier_names.get(
+                classifier.__class__.__name__, classifier.__class__.__name__.lower()
+            )
+        return model.__class__.__name__
+    return DEFAULT_MODEL_NAME
 
 
 try:
     get_model_vectorizer()
 except Exception as exc:
-    logger.exception(
-        "Initial model load failed (%s). The API will still start and retry on requests.",
+    logger.warning(
+        "Initial model load skipped (%s). The API will retry on prediction requests.",
         exc,
     )
 
@@ -144,10 +197,18 @@ def predict_with_timestamps():
         except Exception as exc:
             return jsonify({"error": "Model not loaded", "detail": str(exc)}), 503
 
-        predictions = predict_from_vectorizer(model, vectorizer, preprocessed_comments)
+        predictions, confidences = predict_outputs(model, vectorizer, preprocessed_comments)
         response = [
-            {"comment": comment, "sentiment": sentiment, "timestamp": timestamp}
-            for comment, sentiment, timestamp in zip(comments, predictions, timestamps)
+            {
+                "comment": comment,
+                "sentiment": sentiment,
+                "confidence": confidence,
+                "model": current_model_name(model),
+                "timestamp": timestamp,
+            }
+            for comment, sentiment, confidence, timestamp in zip(
+                comments, predictions, confidences, timestamps
+            )
         ]
         return jsonify(response)
     except Exception as exc:
@@ -156,7 +217,6 @@ def predict_with_timestamps():
             {
                 "error": "Internal server error",
                 "detail": str(exc),
-                "traceback": traceback.format_exc(),
             }
         ), 500
 
@@ -168,8 +228,14 @@ def predict():
         if data is None:
             return jsonify({"error": "Invalid JSON"}), 400
 
+        single_comment = data.get("comment")
         comments = data.get("comments")
-        if not comments:
+        if single_comment is not None:
+            comments = [single_comment]
+            single_response = True
+        else:
+            single_response = False
+        if not isinstance(comments, list) or not comments:
             return jsonify({"error": "No comments provided"}), 400
 
         preprocessed_comments = [preprocess_comment(comment) for comment in comments]
@@ -177,23 +243,55 @@ def predict():
         try:
             model, vectorizer = get_model_vectorizer()
         except Exception as exc:
-            return jsonify({"error": "Model not loaded", "detail": str(exc)}), 503
+            return jsonify({"error": "Model not loaded"}), 503
 
-        predictions = predict_from_vectorizer(model, vectorizer, preprocessed_comments)
+        predictions, confidences = predict_outputs(model, vectorizer, preprocessed_comments)
         response = [
-            {"comment": comment, "sentiment": sentiment}
-            for comment, sentiment in zip(comments, predictions)
+            {
+                "comment": comment,
+                "sentiment": sentiment,
+                "confidence": confidence,
+                "model": current_model_name(model),
+            }
+            for comment, sentiment, confidence in zip(comments, predictions, confidences)
         ]
-        return jsonify(response)
+        return jsonify(response[0] if single_response else response)
     except Exception as exc:
         logger.exception("Unhandled error in /predict: %s", exc)
         return jsonify(
             {
                 "error": "Internal server error",
-                "detail": str(exc),
-                "traceback": traceback.format_exc(),
             }
         ), 500
+
+
+@app.route("/predict_csv", methods=["POST"])
+def predict_csv():
+    """Predict a CSV containing a `comment`, `text`, or `clean_comment` column."""
+    uploaded = request.files.get("file")
+    if uploaded is None or not uploaded.filename:
+        return jsonify({"error": "Upload a CSV file using the 'file' field"}), 400
+    try:
+        frame = pd.read_csv(uploaded)
+        column = next((name for name in ("comment", "text", "clean_comment") if name in frame), None)
+        if column is None:
+            return jsonify({"error": "CSV must contain comment, text, or clean_comment"}), 400
+        comments = frame[column].fillna("").astype(str).tolist()
+        if not any(comment.strip() for comment in comments):
+            return jsonify({"error": "CSV contains no non-empty comments"}), 400
+        preprocessed = [preprocess_comment(comment) for comment in comments]
+        model, vectorizer = get_model_vectorizer()
+        predictions, confidences = predict_outputs(model, vectorizer, preprocessed)
+        result = frame.copy()
+        result["sentiment"] = predictions
+        result["confidence"] = confidences
+        output = io.BytesIO()
+        result.to_csv(output, index=False)
+        output.seek(0)
+        return send_file(output, mimetype="text/csv", as_attachment=True, download_name="predictions.csv")
+    except Exception as exc:
+        logger.exception("CSV prediction failed: %s", exc)
+        return jsonify({"error": "CSV prediction failed"}), 500
 
 
 @app.route("/generate_chart", methods=["POST"])
@@ -233,6 +331,8 @@ def generate_chart():
 @app.route("/generate_wordcloud", methods=["POST"])
 def generate_wordcloud():
     try:
+        from wordcloud import WordCloud
+
         data = request.get_json(silent=True)
         if data is None:
             return jsonify({"error": "Invalid JSON"}), 400
