@@ -114,13 +114,4 @@ Endpoints:
 4. Confidence is returned when the classifier supports probabilities.
 5. API returns sentiment labels or derived visualizations.
 
-## Design Trade-Offs
 
-- Strength:
-  - The project separates offline training from online serving clearly.
-- Strength:
-  - DVC plus MLflow make the project more interview-ready than a notebook-only workflow.
-- Trade-off:
-  - The optional YouTube analysis tab depends on an API key and YouTube API quota, while model inference remains local.
-- Trade-off:
-  - The dataset source is external, so reproducibility depends on that URL remaining available unless you vendor the dataset.
